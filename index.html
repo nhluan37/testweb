@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>📊 So sánh dữ liệu công tơ Realtime</title>
+  <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js" type="module"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js" type="module"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: Arial; margin: 20px; }
+    table { border-collapse: collapse; min-width: 800px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: center; white-space: nowrap; }
+    th { background: #f3f3f3; position: sticky; top: 0; }
+    .table-container { overflow-x: auto; border: 1px solid #ccc; max-width: 100%; margin-top: 10px; }
+    button { padding: 6px 10px; border: none; border-radius: 4px; color: #fff; background: #4caf50; cursor: pointer; }
+    button:hover { background: #388e3c; }
+    input { padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <h2>📡 So sánh dữ liệu công tơ theo thời gian</h2>
+  <div>
+    <label>Mã công tơ:</label>
+    <input id="meterId" value="000000000001">
+    <label>Ngày:</label>
+    <input type="date" id="datePicker">
+    <button id="loadBtn">🔄 Tải dữ liệu</button>
+    <button id="exportBtn">📤 Xuất Excel</button>
+  </div>
+
+  <div class="table-container">
+    <table id="dataTable">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getDatabase, ref, get, child } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    // 🔹 Firebase config
+    const firebaseConfig = {
+      databaseURL: "https://theodoichiso-89528-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // 🔹 Bảng mapping thông số
+    const MAP = [
+      { stt: 1, name: "ID công tơ", code: "0.0.C.1.0" },
+      { stt: 2, name: "Chỉ số hữu công giao tổng (kWh)", code: "1.0.1.8.0" },
+      { stt: 3, name: "Chỉ số hữu công giao 1 (kWh)", code: "1.0.1.8.1" },
+      { stt: 4, name: "Chỉ số hữu công giao 2 (kWh)", code: "1.0.1.8.2" },
+      { stt: 5, name: "Chỉ số hữu công giao 3 (kWh)", code: "1.0.1.8.3" },
+      { stt: 6, name: "Chỉ số hữu công nhận tổng (kWh)", code: "1.0.2.8.0" },
+      { stt: 7, name: "Chỉ số hữu công nhận 1 (kWh)", code: "1.0.2.8.1" },
+      { stt: 8, name: "Chỉ số hữu công nhận 2 (kWh)", code: "1.0.2.8.2" },
+      { stt: 9, name: "Chỉ số hữu công nhận 3 (kWh)", code: "1.0.2.8.3" },
+      { stt: 10, name: "Chỉ số vô công giao (kvarh)", code: "1.0.3.8.0" },
+      { stt: 11, name: "Chỉ số vô công nhận (kvarh)", code: "1.0.4.8.0" },
+      { stt: 12, name: "Dòng điện (A)", code: "1.0.31.7.0" },
+      { stt: 13, name: "Điện áp (V)", code: "1.0.32.7.0" },
+      { stt: 14, name: "Công suất hữu công thuận tổng (kW)", code: "1.0.21.7.0" },
+      { stt: 15, name: "Công suất vô công thuận (kvar)", code: "1.0.23.7.0" },
+      { stt: 16, name: "Hệ số công suất", code: "1.0.33.7.0" },
+      { stt: 17, name: "Tần số (Hz)", code: "1.0.14.7.0" }
+    ];
+
+    const thead = document.getElementById("thead");
+    const tbody = document.getElementById("tbody");
+    const datePicker = document.getElementById("datePicker");
+    const meterIdInput = document.getElementById("meterId");
+
+    datePicker.value = new Date().toISOString().split("T")[0];
+
+    document.getElementById("loadBtn").onclick = loadData;
+    document.getElementById("exportBtn").onclick = exportExcel;
+
+    async function loadData() {
+      const meterId = meterIdInput.value.trim();
+      const date = datePicker.value;
+      if (!meterId) return alert("⚠️ Nhập mã công tơ");
+
+      tbody.innerHTML = "<tr><td colspan='100'>⏳ Đang tải dữ liệu...</td></tr>";
+
+      try {
+        const path = `readings/${meterId}/${date}`;
+        const snap = await get(child(ref(db), path));
+
+        if (!snap.exists()) {
+          tbody.innerHTML = "<tr><td colspan='100'>Không có dữ liệu cho ngày này</td></tr>";
+          return;
+        }
+
+        const data = snap.val();
+        const times = Object.keys(data); // danh sách mốc thời gian
+
+        // === Tạo header ===
+        let headHTML = "<tr><th>STT</th><th>Thông số</th>";
+        times.forEach(t => headHTML += `<th>${t}</th>`);
+        headHTML += "</tr>";
+        thead.innerHTML = headHTML;
+
+        // === Tạo dữ liệu bảng ===
+        let bodyHTML = "";
+        MAP.forEach(m => {
+          bodyHTML += `<tr><td>${m.stt}</td><td>${m.name}</td>`;
+          const key = m.code.replaceAll('.', '_');
+          times.forEach(t => {
+            const val = data[t]?.[key] ?? "";
+            bodyHTML += `<td>${val}</td>`;
+          });
+          bodyHTML += "</tr>";
+        });
+        tbody.innerHTML = bodyHTML;
+
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan='100'>❌ Lỗi: ${err.message}</td></tr>`;
+      }
+    }
+
+    function exportExcel() {
+      const table = document.querySelector("#dataTable");
+      const wb = XLSX.utils.table_to_book(table, { sheet: "RealtimeData" });
+      XLSX.writeFile(wb, `SoSanh_${meterIdInput.value}_${datePicker.value}.xlsx`);
+    }
+  </script>
+</body>
+</html>
